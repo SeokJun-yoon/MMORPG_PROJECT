@@ -7,7 +7,7 @@ void PacketManager::SendPacket(Client* clients, int userID, void * p)
 	Client& u = clients[userID];
 
 	ExOver* exOver = new ExOver;
-	exOver->op = WORKER_OP::OP_SEND;
+	exOver->worker_op = WORKER_OP::OP_SEND;
 	ZeroMemory(&exOver->over, sizeof(exOver->over));
 	exOver->wsabuf.buf = exOver->io_buf;
 	exOver->wsabuf.len = buf[0];

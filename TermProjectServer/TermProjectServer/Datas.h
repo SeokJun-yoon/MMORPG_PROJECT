@@ -53,7 +53,9 @@ struct EventType
 // Overlapped ±¸Á¶Ã¼
 struct ExOver {
 	WSAOVERLAPPED	over;
-	WORKER_OP			op;
+	WORKER_OP		worker_op;
+	DB_OP			db_op;
+	std::wstring	inputName;
 	char			io_buf[MAX_BUF_SIZE];
 	union {
 		WSABUF		wsabuf;

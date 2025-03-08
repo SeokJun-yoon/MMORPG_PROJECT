@@ -5,7 +5,7 @@
 
 #pragma comment (lib, "WS2_32.lib")
 #pragma comment (lib, "mswsock.lib")
-#pragma comment (lib, "lua53.lib")
+#pragma comment (lib, "lua54.lib")
 
 #include "protocol.h"
 #include "EnumList.h"
@@ -13,26 +13,6 @@
 
 using namespace std;
 using namespace chrono;
-
-// DB Thread
-enum class DB_OP {
-	DB_OP_LOAD,
-	DB_OP_CREATE,
-	DB_OP_SAVE
-};
-
-struct DB_TASK
-{
-	DB_OP op_type;
-	int user_id;
-	wstring inputName;
-};
-
-std::queue<DB_TASK> db_task_queue;
-std::mutex db_task_mutex;
-
-void AddDBTask(const DB_TASK& task);
-// DB Thread
 
 priority_queue<EventType> timer_queue;
 mutex timer_lock;
@@ -131,11 +111,11 @@ void PlayerLevelUp(int user_id)
 
 	std::wstring wideName = CharArrayToWString(g_clients[user_id].m_name);
 
-	DB_TASK db_data;
-	db_data.op_type = DB_OP::DB_OP_SAVE;
-	db_data.user_id = g_clients[user_id].m_id;
-	db_data.inputName = wideName;
-	AddDBTask(db_data);
+	ExOver* over = new ExOver;
+	over->db_op = DB_OP::DB_OP_SAVE;
+	over->p_id = g_clients[user_id].m_id;
+	over->inputName = wideName;
+	PostQueuedCompletionStatus(g_iocp, 1, g_clients[user_id].m_id, &over->over);
 
 	PacketManager::SendStatChangePacket(g_clients, user_id, g_clients[user_id].m_id);
 
@@ -431,7 +411,7 @@ void DoMove(int user_id, int direction)
 		if (false == IsPlayer(cl.m_id))
 		{
 			ExOver* over = new ExOver;
-			over->op = WORKER_OP::OP_PLAYER_MOVE;
+			over->worker_op = WORKER_OP::OP_PLAYER_MOVE;
 			over->p_id = user_id;
 			PostQueuedCompletionStatus(g_iocp, 1, cl.m_id, &over->over);
 		}
@@ -585,11 +565,11 @@ void EnterGame(int user_id, char name[])
 	std::wstring wideName = CharArrayToWString(name);
 	//DB::DB_LoadCharacter(g_clients, user_id, wideName, NAME_LEN, DSN_NAME);
 
-	DB_TASK db_data;
-	db_data.op_type = DB_OP::DB_OP_LOAD;
-	db_data.user_id = user_id;
-	db_data.inputName = wideName;
-	AddDBTask(db_data);
+	ExOver* over = new ExOver;
+	over->db_op = DB_OP::DB_OP_LOAD;
+	over->p_id = user_id;
+	over->inputName = wideName;
+	PostQueuedCompletionStatus(g_iocp, 1, user_id, &over->over);
 
 	g_clients[user_id].m_cl.unlock();
 	///////////////////////////////////////////////////////
@@ -732,11 +712,11 @@ void ProcessPacket(int user_id, char* buf)
 		{
 			std::wstring wideName = CharArrayToWString(packet->name);
 
-			DB_TASK db_data;
-			db_data.op_type = DB_OP::DB_OP_CREATE;
-			db_data.user_id = 0;
-			db_data.inputName = wideName;
-			AddDBTask(db_data);
+			ExOver* over = new ExOver;
+			over->db_op = DB_OP::DB_OP_CREATE;
+			over->p_id = 0;
+			over->inputName = wideName;
+			PostQueuedCompletionStatus(g_iocp, 1, 0, &over->over);
 		}
 		break;
 
@@ -781,11 +761,11 @@ void Disconnect(int user_id)
 	// EXEC Game.dbo.SaveCharacter '%s', g_client[user_id].name
 	std::wstring wideName = CharArrayToWString(g_clients[user_id].m_name);
 
-	DB_TASK db_data;
-	db_data.op_type = DB_OP::DB_OP_SAVE;
-	db_data.user_id = g_clients[user_id].m_id;
-	db_data.inputName = wideName;
-	AddDBTask(db_data);
+	ExOver* over = new ExOver;
+	over->db_op = DB_OP::DB_OP_SAVE;
+	over->p_id = g_clients[user_id].m_id;
+	over->inputName = wideName;
+	PostQueuedCompletionStatus(g_iocp, 1, g_clients[user_id].m_id, &over->over);
 
 	g_clients[user_id].m_cl.lock();
 	g_clients[user_id].m_status = ObjectStatus::OS_Alloc;
@@ -841,7 +821,7 @@ void WorkerThread()
 		int user_id = static_cast<int>(key);
 		Client& cl = g_clients[user_id];
 
-		switch (exover->op) {
+		switch (exover->worker_op) {
 		case WORKER_OP::OP_RECV:
 			if (0 == io_byte) Disconnect(user_id);
 			else {
@@ -873,7 +853,7 @@ void WorkerThread()
 				CreateIoCompletionPort(reinterpret_cast<HANDLE>(c_socket), g_iocp, user_id, 0);
 				Client& nc = g_clients[user_id];
 				nc.m_prev_size = 0;
-				nc.m_recv_over.op = WORKER_OP::OP_RECV;
+				nc.m_recv_over.worker_op = WORKER_OP::OP_RECV;
 				ZeroMemory(&nc.m_recv_over.over, sizeof(nc.m_recv_over.over));
 				nc.m_recv_over.wsabuf.buf = nc.m_recv_over.io_buf;
 				nc.m_recv_over.wsabuf.len = MAX_BUF_SIZE;
@@ -1128,11 +1108,11 @@ void Periodically_Save(int user_id)
 		// 일정 주기 마다 호출할 함수
 		std::wstring wideName = CharArrayToWString(g_clients[user_id].m_name);
 
-		DB_TASK db_data;
-		db_data.op_type = DB_OP::DB_OP_SAVE;
-		db_data.user_id = g_clients[user_id].m_id;
-		db_data.inputName = wideName;
-		AddDBTask(db_data);
+		ExOver* over = new ExOver;
+		over->db_op = DB_OP::DB_OP_SAVE;
+		over->p_id = g_clients[user_id].m_id;
+		over->inputName = wideName;
+		PostQueuedCompletionStatus(g_iocp, 1, g_clients[user_id].m_id, &over->over);
 
 		// 마지막 호출 시간을 갱신
 		g_clients[user_id].m_last_connect_time = now;
@@ -1165,7 +1145,7 @@ void DoTimer()
 			case WORKER_OP::OP_RANDOM_MOVE:
 			{
 				ExOver *over = new ExOver;
-				over->op = ev.event_id;
+				over->worker_op = ev.event_id;
 				PostQueuedCompletionStatus(g_iocp, 1, ev.obj_id, &over->over);
 				//add_timer(ev.obj_id, ev.event_id, 1000);
 			}
@@ -1183,50 +1163,48 @@ void DoTimer()
 	}
 }
 
-void AddDBTask(const DB_TASK& task)
-{
-	db_task_mutex.lock();
-	db_task_queue.push(task);
-	db_task_mutex.unlock();
-}
-
 void DoDatabase()
 {
-	while (true)
-	{
-		db_task_mutex.lock();
-		if (!db_task_queue.empty())
-		{
-			DB_TASK db_task = db_task_queue.front();
-			db_task_queue.pop();
-			db_task_mutex.unlock();
+	while (true) {
+		DWORD io_byte;
+		ULONG_PTR key;
+		WSAOVERLAPPED* over;
+		GetQueuedCompletionStatus(g_iocp, &io_byte, &key, &over, INFINITE);
 
-			switch (db_task.op_type) {
+		ExOver* exover = reinterpret_cast<ExOver*>(over);
+		int user_id = static_cast<int>(key);
+		Client& cl = g_clients[user_id];
+
+		switch (exover->db_op)
+		{
 			case DB_OP::DB_OP_LOAD:
 			{
-				IsLoginOK = DB::DB_LoadCharacter(g_clients, db_task.user_id, db_task.inputName, NAME_LEN, DSN_NAME);
-				
-				ExOver* over = new ExOver;
-				over->op = WORKER_OP::OP_DB_LOAD_CHARACTER_SUCCESS;
-				over->p_id = db_task.user_id;
-				PostQueuedCompletionStatus(g_iocp, 1, db_task.user_id, &over->over);			
+				IsLoginOK = DB::DB_LoadCharacter(g_clients, exover->p_id, exover->inputName, NAME_LEN, DSN_NAME);
+							
+				ExOver* workerover = new ExOver;
+				workerover->worker_op = WORKER_OP::OP_DB_LOAD_CHARACTER_SUCCESS;
+				workerover->p_id = exover->p_id;
+				PostQueuedCompletionStatus(g_iocp, 1, workerover->p_id, &workerover->over);
 			}
+			break;
+
+			case DB_OP::DB_OP_CREATE:			
+				DB::DB_CreateCharacter(exover->inputName, DSN_NAME);
 				break;
-			case DB_OP::DB_OP_CREATE:
-				DB::DB_CreateCharacter(db_task.inputName, DSN_NAME);
-				break;
+			
+			break;
+
 			case DB_OP::DB_OP_SAVE:
-				DB::DB_SaveCharacter(g_clients, db_task.user_id, db_task.inputName, DSN_NAME);
+				DB::DB_SaveCharacter(g_clients, exover->p_id, exover->inputName, DSN_NAME);
 				break;
-			}
-		}
-		else
-		{
-			db_task_mutex.unlock();
-			this_thread::sleep_for(1ms);
+
+			default:
+				cout << "Unknown Operation in DatabaseThread!\n";
+				while (true);
 		}
 	}
 }
+
 
 int main()
 {
@@ -1255,7 +1233,7 @@ int main()
 	SOCKET c_socket = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
 	ExOver accept_over;
 	ZeroMemory(&accept_over.over, sizeof(accept_over.over));
-	accept_over.op = WORKER_OP::OP_ACCEPT;
+	accept_over.worker_op = WORKER_OP::OP_ACCEPT;
 	accept_over.c_socket = c_socket;
 	AcceptEx(l_socket, c_socket, accept_over.io_buf, NULL, sizeof(sockaddr_in) + 16, sizeof(sockaddr_in) + 16, NULL, &accept_over.over);
 
